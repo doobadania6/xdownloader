@@ -1,7 +1,7 @@
 import os
 import requests
 import yt_dlp
-from flask import Flask, render_template_string, request, jsonify, Response, stream_with_context
+from flask import Flask, render_template_string, request, jsonify, redirect
 
 app = Flask(__name__)
 
@@ -11,45 +11,38 @@ HTML_TEMPLATE = '''
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>X Video Downloader - Ultimate</title>
+    <title>X Downloader - Szybka Wersja</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #15202b; color: white; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
         .container { background: #192734; padding: 2rem; border-radius: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); width: 90%; max-width: 500px; text-align: center; border: 1px solid #38444d; }
         h1 { color: #1d9bf0; }
         input { width: 100%; padding: 15px; margin: 20px 0; border: 1px solid #38444d; border-radius: 9999px; background: #15202b; color: white; font-size: 16px; box-sizing: border-box; outline: none; }
-        input:focus { border-color: #1d9bf0; }
-        button { background: #1d9bf0; color: white; border: none; padding: 15px 40px; border-radius: 9999px; cursor: pointer; font-weight: bold; font-size: 16px; width: 100%; transition: 0.2s; }
-        button:hover { background: #1a8cd8; }
-        button:disabled { background: #0e4e78; cursor: not-allowed; }
-        #result { margin-top: 30px; border-top: 1px solid #38444d; padding-top: 20px; }
-        .download-link { display: block; background: #00ba7c; color: white; text-decoration: none; padding: 15px; border-radius: 10px; font-weight: bold; margin-top: 10px; }
-        .error-msg { color: #e0245e; background: rgba(224, 36, 94, 0.1); padding: 10px; border-radius: 10px; margin-top: 10px; font-size: 14px; }
+        button { background: #1d9bf0; color: white; border: none; padding: 15px 40px; border-radius: 9999px; cursor: pointer; font-weight: bold; font-size: 16px; width: 100%; }
+        button:disabled { background: #0e4e78; }
+        #result { margin-top: 30px; }
+        .download-btn { display: block; background: #00ba7c; color: white; text-decoration: none; padding: 15px; border-radius: 10px; font-weight: bold; margin-top: 10px; }
         .loader { border: 3px solid #f3f3f3; border-top: 3px solid #1d9bf0; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; display: inline-block; vertical-align: middle; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-        .hidden { display: none; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>X Video Pro</h1>
-        <p>Pobieranie w najlepszej możliwej jakości bez błędów.</p>
+        <h1>X Video Downloader</h1>
+        <p>Szybka analiza linku...</p>
         <form id="dlForm">
             <input type="url" id="urlInput" placeholder="Wklej link z X..." required>
-            <button type="submit" id="btn">Analizuj i przygotuj</button>
+            <button type="submit" id="btn">Przygotuj Pobieranie</button>
         </form>
-        <div id="result" class="hidden"></div>
+        <div id="result"></div>
     </div>
 
     <script>
-        const form = document.getElementById('dlForm');
-        const btn = document.getElementById('btn');
-        const result = document.getElementById('result');
-
-        form.onsubmit = async (e) => {
+        document.getElementById('dlForm').onsubmit = async (e) => {
             e.preventDefault();
+            const btn = document.getElementById('btn');
+            const result = document.getElementById('result');
             btn.disabled = true;
-            btn.innerHTML = '<span class="loader"></span> Trwa sprawdzanie jakości...';
-            result.classList.add('hidden');
+            btn.innerHTML = '<span class="loader"></span> Pobieranie danych...';
             
             try {
                 const response = await fetch('/extract', {
@@ -59,17 +52,14 @@ HTML_TEMPLATE = '''
                 });
                 const data = await response.json();
                 if (data.success) {
-                    result.innerHTML = `<div style="text-align:left;">
-                        <p style="font-size:14px; color:#8899a6;">Tytuł: ${data.title}</p>
-                        <a href="${data.url}" class="download-link">POBIERZ MP4 (${data.quality})</a>
-                    </div>`;
-                    result.classList.remove('hidden');
-                } else {
-                    result.innerHTML = `<div class="error-msg">Błąd: ${data.error}</div>`;
-                    result.classList.remove('hidden');
-                }
-            } catch (err) { alert("Błąd połączenia z serwerem."); }
-            finally { btn.disabled = false; btn.innerText = "Analizuj i przygotuj"; }
+                    result.innerHTML = `
+                        <p style="font-size:14px; color:#8899a6;">Jakość: ${data.quality}</p>
+                        <a href="${data.url}" target="_blank" class="download-link">KLIKNIJ ABY POBRAĆ MP4</a>
+                        <p style="font-size:12px; color:#8899a6; margin-top:10px;">Jeśli otworzy się w nowym oknie: prawy przycisk myszy -> Zapisz jako.</p>
+                    `;
+                } else { alert("Błąd: " + data.error); }
+            } catch (err) { alert("Błąd połączenia."); }
+            finally { btn.disabled = false; btn.innerText = "Przygotuj Pobieranie"; }
         };
     </script>
 </body>
@@ -84,17 +74,11 @@ def home():
 def extract():
     target_url = request.form.get('url')
     
-    # Próbujemy najpierw 1080p, ale jeśli serwer nie ma ffmpeg, yt-dlp 
-    # automatycznie wybierze najlepszy "gotowy" plik mp4 (zazwyczaj 720p)
+    # Używamy prostego formatu, który nie wymaga łączenia obrazu i dźwięku (aby uniknąć kręcenia)
     ydl_opts = {
-        'format': 'best[ext=mp4]/best', # Wybiera najlepszy gotowy plik MP4
+        'format': 'best[ext=mp4]', 
         'quiet': True,
         'no_warnings': True,
-        'nocheckcertificate': True,
-        'http_headers': {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Referer': 'https://x.com/',
-        }
     }
 
     try:
@@ -102,52 +86,17 @@ def extract():
             info = ydl.extract_info(target_url, download=False)
             video_url = info.get('url')
             
-            # Pobieramy info o rozdzielczości, żeby pokazać użytkownikowi
-            width = info.get('width', '???')
-            height = info.get('height', '???')
-            quality_str = f"{width}x{height}"
-            
-            title = "".join([x for x in info.get('title', 'video') if x.isalnum() or x==' '])[:50]
-            
-            safe_url = requests.utils.quote(video_url)
-            download_proxy_url = f"/stream_video?url={safe_url}&title={title}"
+            # Jeśli video_url zawiera link do Twittera, musimy go przepuścić przez nasz uproszczony proxy
+            # Ale tym razem zrobimy to bez streamingu, który zawiesza serwer
+            quality = f"{info.get('width', '???')}x{info.get('height', '???')}"
             
             return jsonify({
                 'success': True, 
-                'url': download_proxy_url, 
-                'title': title, 
-                'quality': quality_str
+                'url': video_url, # Przekazujemy bezpośredni link
+                'quality': quality
             })
     except Exception as e:
-        return jsonify({'success': False, 'error': "Twitter zablokował dostęp lub link jest niepoprawny."})
-
-@app.route('/stream_video')
-def stream_video():
-    video_url = request.args.get('url')
-    title = request.args.get('title', 'video')
-    
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Referer': 'https://x.com/',
-        'Accept': '*/*',
-        'Connection': 'keep-alive',
-    }
-
-    def generate():
-        try:
-            with requests.get(video_url, headers=headers, stream=True, timeout=60) as r:
-                r.raise_for_status()
-                for chunk in r.iter_content(chunk_size=128*1024):
-                    if chunk:
-                        yield chunk
-        except:
-            pass
-
-    return Response(
-        stream_with_context(generate()),
-        mimetype='video/mp4',
-        headers={"Content-disposition": f"attachment; filename={title}.mp4"}
-    )
+        return jsonify({'success': False, 'error': "Nie udało się pobrać danych. Spróbuj inny link."})
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
