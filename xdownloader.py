@@ -1,10 +1,11 @@
 import os
-from flask import Flask, render_template_string, request, jsonify
+import requests
 import yt_dlp
+from flask import Flask, render_template_string, request, jsonify, Response, stream_with_context
 
 app = Flask(__name__)
 
-# Wygląd aplikacji inspirowany nowoczesnym stylem X (Twittera)
+# Wygląd aplikacji
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="pl">
@@ -34,11 +35,11 @@ HTML_TEMPLATE = '''
 <body>
     <div class="container">
         <h1>X Video Downloader</h1>
-        <p>Pobieraj wideo z X (Twittera) bez reklam i trackerów.</p>
+        <p>Pobieraj wideo z X (Twittera) bez reklam i blokad.</p>
         
         <form id="dlForm">
             <input type="url" id="urlInput" placeholder="Wklej link do posta (np. https://x.com/...)" required>
-            <button type="submit" id="btn">Wygeneruj link do pobrania</button>
+            <button type="submit" id="btn">Pobierz Wideo</button>
         </form>
 
         <div id="result" class="hidden"></div>
@@ -52,7 +53,7 @@ HTML_TEMPLATE = '''
         form.onsubmit = async (e) => {
             e.preventDefault();
             btn.disabled = true;
-            btn.innerHTML = '<span class="loader"></span> Analizuję wideo...';
+            btn.innerHTML = '<span class="loader"></span> Analizuję...';
             result.classList.add('hidden');
             
             const url = document.getElementById('urlInput').value;
@@ -69,8 +70,7 @@ HTML_TEMPLATE = '''
                     result.innerHTML = `
                         <div class="video-info">
                             <p style="color:white; margin-top:0;"><strong>Tytuł:</strong> ${data.title}</p>
-                            <a href="${data.url}" target="_blank" class="download-link">POBIERZ PLIK MP4</a>
-                            <p style="font-size: 12px; margin-bottom:0;">Tip: Jeśli wideo otworzy się w nowym oknie, kliknij prawym przyciskiem i wybierz "Zapisz wideo jako...".</p>
+                            <a href="${data.url}" class="download-link">ZAPISZ WIDEO NA DYSKU</a>
                         </div>
                     `;
                     result.classList.remove('hidden');
@@ -78,10 +78,10 @@ HTML_TEMPLATE = '''
                     alert("Błąd: " + data.error);
                 }
             } catch (err) {
-                alert("Wystąpił błąd podczas połączenia z serwerem.");
+                alert("Wystąpił błąd połączenia.");
             } finally {
                 btn.disabled = false;
-                btn.innerText = "Wygeneruj link do pobrania";
+                btn.innerText = "Pobierz Wideo";
             }
         };
     </script>
@@ -97,9 +97,8 @@ def home():
 def extract():
     target_url = request.form.get('url')
     
-    # Konfiguracja yt-dlp do wyciągnięcia najlepszego dostępnego linku mp4
     ydl_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'format': 'best[ext=mp4]/best',
         'quiet': True,
         'no_warnings': True,
     }
@@ -107,17 +106,41 @@ def extract():
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(target_url, download=False)
-            # Wybieramy bezpośredni URL do pliku
             video_url = info.get('url')
-            title = info.get('title', 'Video_z_X')
+            title = "".join([c for c in info.get('title', 'video') if c.isalnum() or c in (' ', '_')]).strip()
+            
+            # Tworzymy bezpieczny link do naszego wewnętrznego proxy
+            download_proxy_url = f"/download_file?url={video_url}&title={title}"
             
             return jsonify({
                 'success': True,
-                'url': video_url,
+                'url': download_proxy_url,
                 'title': title
             })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/download_file')
+def download_file():
+    video_url = request.args.get('url')
+    title = request.args.get('title', 'video')
+    
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://x.com/'
+    }
+
+    def generate():
+        with requests.get(video_url, headers=headers, stream=True) as r:
+            r.raise_for_status()
+            for chunk in r.iter_content(chunk_size=8192):
+                yield chunk
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype='video/mp4',
+        headers={"Content-disposition": f"attachment; filename={title}.mp4"}
+    )
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
